@@ -15,10 +15,9 @@ services:
         generateValue: true
 
   # 2. React Frontend Static Site (served via CDN)
-  - type: web
+  - type: static
     name: splitwise-frontend
-    env: static
-    buildCommand: npm run build
+    buildCommand: npm install && npm run build
     publishPath: dist
     plan: free
     rootDir: frontend
