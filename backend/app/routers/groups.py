@@ -93,3 +93,23 @@ def get_group_balances(group_id: int, db: Session = Depends(get_db), current_use
         "balances": balances_list,
         "simplified_debts": simplified_debts
     }
+
+@router.get("/{group_id}/breakdown/{user_id}")
+def get_member_breakdown(
+    group_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Returns the expense-by-expense breakdown of a member's balance in the group.
+    Satisfies Rohan's requirement: see exactly which expenses make up the total owed.
+    """
+    if not crud.is_user_in_group(db, group_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this group"
+        )
+    breakdown = balances.get_member_expense_breakdown(db, group_id, user_id)
+    return {"breakdown": breakdown}
+

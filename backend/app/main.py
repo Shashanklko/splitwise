@@ -9,7 +9,8 @@ from typing import List, Dict
 from app.database import engine, Base, get_db
 from app.config import settings
 from app import models, schemas, crud
-from app.routers import auth, groups, expenses, settlements, users
+from app.routers import auth, groups, expenses, settlements, users, import_csv
+from app.auth import get_current_user
 
 import time
 from sqlalchemy.exc import OperationalError
@@ -46,6 +47,7 @@ app.include_router(groups.router)
 app.include_router(expenses.router)
 app.include_router(settlements.router)
 app.include_router(users.router)
+app.include_router(import_csv.router)
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -179,3 +181,134 @@ async def websocket_endpoint(
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy"}
+
+
+# ── Group Chat: REST history endpoint ────────────────────────────────────────
+
+@app.get("/api/groups/{group_id}/messages")
+def get_group_messages(
+    group_id: int,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Fetch the last `limit` messages for a group channel (for initial load)."""
+    if not crud.is_user_in_group(db, group_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Not a member of this group")
+
+    msgs = (
+        db.query(models.GroupMessage)
+        .filter(models.GroupMessage.group_id == group_id)
+        .order_by(models.GroupMessage.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": m.id,
+            "group_id": m.group_id,
+            "user_id": m.user_id,
+            "user_name": m.user_name,
+            "message": m.message,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in msgs
+    ]
+
+
+# ── Group Chat: WebSocket ─────────────────────────────────────────────────────
+
+# Separate connection manager for group chat rooms (keyed by group_id)
+group_chat_manager = ConnectionManager()
+
+
+@app.websocket("/ws/groups/{group_id}/chat")
+async def group_chat_websocket(
+    websocket: WebSocket,
+    group_id: int,
+    token: str = Query(...),
+):
+    """
+    Group-level real-time chat channel.
+    All active members of the group can send and receive messages here.
+    Messages are persisted in the `group_messages` table.
+    """
+    db: Session = next(get_db())
+
+    # 1. Authenticate
+    try:
+        user = get_ws_user(token, db)
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        db.close()
+        return
+
+    # 2. Check group membership
+    if not crud.is_user_in_group(db, group_id, user.id):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        db.close()
+        return
+
+    # 3. Connect to the group room
+    await group_chat_manager.connect(websocket, group_id)
+
+    # 4. Send message history on connect
+    try:
+        msgs = (
+            db.query(models.GroupMessage)
+            .filter(models.GroupMessage.group_id == group_id)
+            .order_by(models.GroupMessage.created_at.asc())
+            .limit(100)
+            .all()
+        )
+        history = [
+            {
+                "id": m.id,
+                "group_id": m.group_id,
+                "user_id": m.user_id,
+                "user_name": m.user_name,
+                "message": m.message,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in msgs
+        ]
+        await websocket.send_text(json.dumps({"type": "history", "messages": history}))
+
+        # 5. Listen for new messages
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            message_text = payload.get("message", "").strip()
+
+            if message_text:
+                # Persist message
+                db_msg = models.GroupMessage(
+                    group_id=group_id,
+                    user_id=user.id,
+                    message=message_text,
+                )
+                db.add(db_msg)
+                db.commit()
+                db.refresh(db_msg)
+
+                # Broadcast to all room members
+                broadcast_payload = {
+                    "type": "message",
+                    "message": {
+                        "id": db_msg.id,
+                        "group_id": db_msg.group_id,
+                        "user_id": db_msg.user_id,
+                        "user_name": db_msg.user_name,
+                        "message": db_msg.message,
+                        "created_at": db_msg.created_at.isoformat(),
+                    },
+                }
+                await group_chat_manager.broadcast(json.dumps(broadcast_payload), group_id)
+
+    except WebSocketDisconnect:
+        group_chat_manager.disconnect(websocket, group_id)
+    except Exception:
+        group_chat_manager.disconnect(websocket, group_id)
+    finally:
+        db.close()
+

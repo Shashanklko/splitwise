@@ -51,14 +51,20 @@ def create_group(db: Session, group_in: schemas.GroupCreate, creator_id: int) ->
     db.refresh(db_group)
     
     # Creator is automatically a member
-    db_member = models.GroupMember(group_id=db_group.id, user_id=creator_id)
+    import datetime
+    db_member = models.GroupMember(
+        group_id=db_group.id,
+        user_id=creator_id,
+        joined_at=datetime.datetime.utcnow()
+    )
     db.add(db_member)
     db.commit()
     
     db.refresh(db_group)
     return db_group
 
-def add_user_to_group(db: Session, group_id: int, user_email: str) -> models.User:
+def add_user_to_group(db: Session, group_id: int, user_email: str, joined_at=None) -> models.User:
+    import datetime
     user = get_user_by_email(db, user_email)
     if not user:
         raise HTTPException(
@@ -66,10 +72,11 @@ def add_user_to_group(db: Session, group_id: int, user_email: str) -> models.Use
             detail="User not found with this email"
         )
     
-    # Check if already in group
+    # Check if already in group (active)
     existing_member = db.query(models.GroupMember).filter(
         models.GroupMember.group_id == group_id,
-        models.GroupMember.user_id == user.id
+        models.GroupMember.user_id == user.id,
+        models.GroupMember.left_at == None
     ).first()
     
     if existing_member:
@@ -78,15 +85,21 @@ def add_user_to_group(db: Session, group_id: int, user_email: str) -> models.Use
             detail="User is already a member of this group"
         )
     
-    db_member = models.GroupMember(group_id=group_id, user_id=user.id)
+    db_member = models.GroupMember(
+        group_id=group_id,
+        user_id=user.id,
+        joined_at=joined_at or datetime.datetime.utcnow()
+    )
     db.add(db_member)
     db.commit()
     return user
 
-def remove_user_from_group(db: Session, group_id: int, user_id: int):
+def remove_user_from_group(db: Session, group_id: int, user_id: int, left_at=None):
+    import datetime
     db_member = db.query(models.GroupMember).filter(
         models.GroupMember.group_id == group_id,
-        models.GroupMember.user_id == user_id
+        models.GroupMember.user_id == user_id,
+        models.GroupMember.left_at == None
     ).first()
     
     if not db_member:
@@ -95,14 +108,27 @@ def remove_user_from_group(db: Session, group_id: int, user_id: int):
             detail="User is not a member of this group"
         )
     
-    db.delete(db_member)
+    # Soft delete: record when they left instead of deleting the row
+    db_member.left_at = left_at or datetime.datetime.utcnow()
     db.commit()
 
 def is_user_in_group(db: Session, group_id: int, user_id: int) -> bool:
+    """Check if user is currently an active member (no left_at set)."""
     return db.query(models.GroupMember).filter(
         models.GroupMember.group_id == group_id,
-        models.GroupMember.user_id == user_id
+        models.GroupMember.user_id == user_id,
+        models.GroupMember.left_at == None
     ).first() is not None
+
+def get_member_active_window(db: Session, group_id: int, user_id: int):
+    """Return (joined_at, left_at) for a member's most recent membership record."""
+    record = db.query(models.GroupMember).filter(
+        models.GroupMember.group_id == group_id,
+        models.GroupMember.user_id == user_id
+    ).order_by(models.GroupMember.joined_at.desc()).first()
+    if not record:
+        return None, None
+    return record.joined_at, record.left_at
 
 # --- Expense & Split Calculation Logic ---
 
@@ -233,6 +259,9 @@ def create_expense(db: Session, expense_in: schemas.ExpenseCreate) -> models.Exp
         group_id=expense_in.group_id,
         description=expense_in.description,
         amount=expense_in.amount,
+        currency=getattr(expense_in, 'currency', 'INR') or 'INR',
+        original_amount=getattr(expense_in, 'original_amount', None),
+        exchange_rate=getattr(expense_in, 'exchange_rate', None),
         split_type=expense_in.split_type
     )
     db.add(db_expense)

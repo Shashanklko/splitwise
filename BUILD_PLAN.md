@@ -22,8 +22,9 @@ We mapped and implemented five critical user workflows:
 5.  **Interactive Bill Discussions**: Joining live, real-time WebSocket chat feeds linked to individual bills.
 
 ### Product Assumptions
-*   **Registered Search**: Users can only invite other registered members to a group by searching their exact email addresses. 
-*   **Single Currency**: The app assumes a single standard currency (Rupees - ₹) to avoid foreign exchange rate conversion complexities.
+*   **Registered Search**: Users can only invite other registered members to a group by searching their exact email addresses.
+*   **Base Currency Standardization**: While expenses can be entered in foreign currencies (like USD), the app converts and standardizes the ledger into a base currency (Rupees - ₹) at a fixed exchange rate upon import/entry to avoid live FX volatility.
+*   **Time-Aware Liability**: A user's financial liability in a group only spans the exact window between when they joined and when they left (soft-deleted).
 *   **Manual Settle Up**: Settlements are recorded manually as ledger balances. No real payment gateways (such as Stripe or UPI links) are integrated.
 
 ---
@@ -54,11 +55,14 @@ We mapped and implemented five critical user workflows:
 *   `GET /api/auth/me` - Profile context.
 *   `GET /api/groups` & `POST /api/groups` - Group listing and creation.
 *   `POST /api/groups/{group_id}/members` - Add member to group.
-*   `DELETE /api/groups/{group_id}/members/{user_id}` - Remove member (creator-only).
-*   `GET /api/groups/{group_id}/balances` - Calculate ledger and simplified debts.
+*   `DELETE /api/groups/{group_id}/members/{user_id}` - Soft-remove member (sets `left_at`).
+*   `GET /api/groups/{group_id}/balances` - Calculate time-aware ledger and simplified debts.
+*   `GET /api/groups/{group_id}/breakdown/{user_id}` - Granular expense breakdown for a member.
 *   `POST /api/expenses` & `PUT/DELETE /api/expenses/{id}` - Expense CRUD.
 *   `POST /api/settlements` - Record settlement.
-*   `WS /ws/expenses/{id}/comments?token=JWT` - Real-time chat socket.
+*   `POST /api/import/preview` & `POST /api/import/commit` - Two-phase CSV import.
+*   `WS /ws/expenses/{id}/comments?token=JWT` - Real-time thread for specific expense.
+*   `WS /ws/groups/{group_id}/chat?token=JWT` - Real-time group-level chat channel.
 
 ### Frontend Structure
 *   `src/context/AuthContext.tsx`: Manages active session caching and tokens.
@@ -75,24 +79,24 @@ We mapped and implemented five critical user workflows:
 
 ## 3. AI Collaboration Process
 
-### Instruction Flow
-The user guided the implementation of the clone across consecutive phases:
+### Instruction Flow & Role Dynamic
+The project was built from scratch using a strict role-based dynamic: **The User acted as the Product Manager and Senior Developer**, defining the architecture, product requirements, and business rules. **Antigravity AI acted as the Junior Engineer**, executing the code, scaffolding the stack, and implementing the requested features under the user's guidance.
+
+The Senior Developer (User) guided the Junior Engineer (Antigravity AI) across consecutive phases:
 1.  **Backend Foundation**: Instructing the development of the FastAPI routes, models, and WebSocket server.
 2.  **Frontend Layout**: Building the React app pages, Tailwind grid styling, modals, and linking AuthContext.
 3.  **Visual Styling Adjustments**: Specifying a global light geometric repeating triangular grid background across all views.
-4.  **Logo and Back Buttons**: Directing the integration of `logo_splitwise.png` globally and adding navigation "Back" links on Auth cards.
-5.  **Vector Illustrations Accuracy**: Rejecting the procedural canvas plane in favor of using authentic, tessellated Splitwise vector polygon shapes on the landing page.
-6.  **Containerization**: Prompting to Dockerize the entire project.
-7.  **Deployment**: Selecting Render as the production host, leading to blueprint automation.
+4.  **Advanced Data Import**: Designing a two-phase CSV import tool to handle messy historical data, explicitly instructing the AI to "not silently fix anything" but rather surface 12 specific anomaly types for user resolution.
+5.  **Time-Aware Memberships**: Correcting the AI's initial "hard-delete" approach to member removal, instructing it to implement soft-deletes (`left_at`) to preserve historical balance accuracy.
+6.  **Transparency & Communication**: Requesting a granular expense breakdown endpoint ("no magic numbers") and expanding WebSockets into a full-featured persistent group chat panel.
 
 ### Queries and Answers
-*   *Database Choices*: We aligned on using PostgreSQL for production and SQLite for local development fallbacks.
-*   *Tailwind & Styling*: Selected TailwindCSS for styling layout cards, utilizing custom glassmorphism colors.
-*   *Illustration Colors*: Extracted exact class styles (`s-p`, `s-h`, `s-ht`, `s-a`) from the compiled Splitwise motel CSS sheets to paint authentic colors on paths.
-*   *WebSocket Upgrades*: Set up HTTP proxy headers inside the Nginx container to forward WebSocket connection handshakes to the backend without dropping connections.
+*   *Database Choices*: The Senior Developer mandated PostgreSQL for production and SQLite for local development fallbacks.
+*   *Tailwind & Styling*: Selected TailwindCSS for styling layout cards, utilizing custom glassmorphism colors based on the Senior Developer's visual specs.
+*   *Currency Handling*: When a spreadsheet revealed USD expenses, the Senior Developer instructed the AI to store original currencies but calculate balances in a fixed baseline currency.
 
 ### AI_CONTEXT.md Maintenance
-The [AI_CONTEXT.md](file:///e:/Project/Splitwise/AI_CONTEXT.md) was updated and used as the single source of truth at the start of each conversation step. All schemas, routes, and business rules were recorded there to maintain consistency across checkpoints.
+The [AI_CONTEXT.md](file:///e:/Project/Splitwise/AI_CONTEXT.md) was maintained by the Junior Engineer as the single source of truth at the start of each conversation step, reflecting the Senior Developer's architectural decisions.
 
 ---
 
@@ -104,7 +108,7 @@ The [AI_CONTEXT.md](file:///e:/Project/Splitwise/AI_CONTEXT.md) was updated and 
 *   **No Password Recovery**: Access is strictly reliant on active passwords; email recovery/reset mechanisms were avoided.
 
 ### Hardcoded Elements
-*   **Single Currency**: Rupee (₹) symbol is statically rendered on all badges and lists.
+*   **Base Currency**: Rupee (₹) symbol is statically rendered on all badges and aggregate lists, even if the underlying `original_amount` is in USD.
 *   **Token Expirations**: JWT tokens are configured to expire after a fixed duration (7 days) for convenience.
 
 ### Avoided Complexities
@@ -114,6 +118,6 @@ The [AI_CONTEXT.md](file:///e:/Project/Splitwise/AI_CONTEXT.md) was updated and 
 
 ### Improvements for the Future
 *   **Database Pooling**: Integrate PgBouncer in production to handle highly concurrent database connections efficiently.
-*   **Multi-Currency Support**: Add real-time exchange rate API integrations to allow sharing bills in foreign currencies.
+*   **Live FX API**: Replace the fixed import-time exchange rate with a live FX API for real-time dynamic multi-currency ledgers.
 *   **WebSocket Resiliency**: Implement exponential backoff reconnection strategies on the React client side in case of network drops.
 *   **Push Notifications**: Add browser push notifications for comments logged on shared bills.

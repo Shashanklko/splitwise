@@ -13,18 +13,20 @@ This document serves as the single source of truth for the Splitwise Clone proje
 ### Product Scope
 * **In-Scope (MVP)**:
   * **Authentication**: Email-based signup and login with secure sessions.
-  * **Group Ledgering**: Creating groups and inviting members by email. The group creator holds admin privileges to remove members.
+  * **Group Ledgering**: Creating groups, inviting members by email, and maintaining **time-aware membership** (`joined_at` and `left_at` timestamps) to ensure users are only responsible for expenses logged during their active tenure.
   * **Expense Logging**: Creating, editing, and deleting expenses with support for 4 split algorithms:
     * *Equally*: Costs divided evenly among participants.
     * *Unequally*: Specific currency amounts per person.
     * *Percentage*: Splits defined by percentages (must sum to exactly 100%).
     * *Shares*: Splits calculated using proportional coefficients.
+  * **Multi-Currency Support**: Storing original foreign currency amounts and the exchange rate used, while standardizing balances in a base currency (INR).
   * **Debt Simplification**: Applying a greedy minimization algorithm (Min-Cash-Flow) to reduce the transaction count required to clear group balances.
-  * **Real-time Chat**: Native WebSockets allowing group members to comment on specific bills in real time.
+  * **Expense Breakdown Drilldown**: Providing granular views of exactly which expenses contribute to a user's net balance.
+  * **Historical Data Import**: Two-phase CSV import tool that detects data anomalies (duplicates, currency mismatches, missing payers, non-members) and allows row-by-row resolution before committing.
+  * **Real-time Communication**: Native WebSockets powering both expense-specific comment threads and persistent group-level chat channels.
   * **Manual Settlements**: Recording manual payments between members to bring outstanding balances to zero.
 * **Out-of-Scope**:
   * Real payment gateway integrations (Stripe, UPI, PayPal).
-  * Native multi-currency ledgering (standardized on a single baseline currency, INR, to avoid exchange rate volatility).
   * Receipt scanning/OCR recognition.
   * Recurring/scheduled monthly bills.
 
@@ -66,6 +68,8 @@ erDiagram
     users ||--o{ settlements : settles
     expenses ||--o{ comments : discusses
     users ||--o{ comments : writes
+    groups ||--o{ group_messages : hosts_chat
+    users ||--o{ group_messages : sends
 ```
 
 * **`users`**:
@@ -82,11 +86,16 @@ erDiagram
 * **`group_members`**:
   * `group_id` (Integer, Foreign Key to `groups`, Primary Key)
   * `user_id` (Integer, Foreign Key to `users`, Primary Key)
+  * `joined_at` (DateTime, Nullable)
+  * `left_at` (DateTime, Nullable)
 * **`expenses`**:
   * `id` (Integer, Primary Key)
   * `group_id` (Integer, Foreign Key to `groups`, Nullable)
   * `description` (String)
-  * `amount` (Numeric(10, 2))
+  * `amount` (Numeric(10, 2)) - *Always in INR*
+  * `currency` (String)
+  * `original_amount` (Numeric(10, 4), Nullable)
+  * `exchange_rate` (Numeric(10, 6), Nullable)
   * `split_type` (String: `equally`, `unequally`, `percentage`, `shares`)
   * `created_at` (DateTime)
 * **`expense_payers`**:
@@ -111,6 +120,12 @@ erDiagram
   * `user_id` (Integer, Foreign Key to `users`)
   * `message` (Text)
   * `created_at` (DateTime)
+* **`group_messages`**:
+  * `id` (Integer, Primary Key)
+  * `group_id` (Integer, Foreign Key to `groups`)
+  * `user_id` (Integer, Foreign Key to `users`)
+  * `message` (Text)
+  * `created_at` (DateTime)
 
 ---
 
@@ -127,8 +142,9 @@ erDiagram
 * `GET /api/groups` - Lists all groups the authenticated user is a member of.
 * `POST /api/groups` - Creates a new group.
 * `POST /api/groups/{group_id}/members` - Adds a member to a group by email.
-* `DELETE /api/groups/{group_id}/members/{user_id}` - Removes a member (admin-only).
-* `GET /api/groups/{group_id}/balances` - Computes members' balances and simplified debts.
+* `DELETE /api/groups/{group_id}/members/{user_id}` - Soft-removes a member (sets `left_at`).
+* `GET /api/groups/{group_id}/balances` - Computes time-aware members' balances and simplified debts.
+* `GET /api/groups/{group_id}/breakdown/{user_id}` - Fetches granular expense breakdown for a specific member's balance.
 
 #### Expense & Settlement Endpoints
 * `GET /api/expenses` - Lists expenses (filterable by `group_id`).
@@ -138,8 +154,14 @@ erDiagram
 * `POST /api/settlements` - Logs a manual payment settlement.
 * `GET /api/users/search?q={query}` - Search registered users by email/name.
 
-#### WebSockets Discussion Feed
-* `WS /ws/expenses/{expense_id}/comments?token={JWT}` - Establishes real-time chat. Comments are persisted to `comments` and broadcasted to active connections in the room.
+#### CSV Import Endpoints
+* `POST /api/import/preview` - Parses CSV, detects anomalies, and returns a preview report.
+* `POST /api/import/commit` - Processes the user-resolved anomaly decisions and inserts approved data.
+
+#### WebSockets Discussion Feeds
+* `WS /ws/expenses/{expense_id}/comments?token={JWT}` - Real-time thread for a specific expense.
+* `WS /ws/groups/{group_id}/chat?token={JWT}` - Persistent, real-time group-level chat channel.
+* `GET /api/groups/{group_id}/messages` - Fetches historical messages for the group chat.
 
 ### Frontend Structure
 * **Authentication Views**: `/login` (Sign in) and `/register` (Sign up).
@@ -166,28 +188,37 @@ erDiagram
 
 ## 6. Implementation Dialogues (Prompts & AI Responses)
 
-To illustrate the technical alignment, here are key design discussions and collaborative decisions made during development:
+To illustrate the technical alignment, here are key design discussions and collaborative decisions made during development, driven by the user (acting as PM/Senior Developer) and Antigravity AI (acting as Junior Engineer):
 
-### Dialogue 1: Core Architecture & Styling Realignment
-* **Developer Alignment**: "Let's align on the styling and layout for the clone. We want to use TailwindCSS for layout design, applying light geometric repeating grid elements on the background and displaying genuine, colored vector illustrations on the landing page matching the original branding color codes."
-* **System Design Response**: "I will structure the components to load custom CSS backgrounds and map paths for SVG polygon vectors, applying exact CSS hex codes extracted from standard style sheets. The frontend context will manage state via standard React Hook Contexts to keep the application lightweight."
+### Dialogue 1: Project Scaffolding & AI Role Definition
+* **Senior Dev (User)**: "I want to build a shared expenses app from scratch using this tool. I will act as the Product Manager/Senior Developer, and you will be my junior engineer. Let's start with a solid tech stack, modern UI, and comprehensive database architecture."
+* **Junior Engineer (Antigravity)**: "Understood! I'll set up the FastAPI backend, PostgreSQL schema, and React/Tailwind frontend. I'll rely on your guidance for product logic, feature prioritization, and architectural decisions."
 
-### Dialogue 2: Database Initialization & Seeding Strategy
-* **Developer Alignment**: "We need to set up a comprehensive test dataset representing a flat's shared expenses and a vacation ledger. Let's create accounts for all roommates (Aisha, Priya, Rohan, Dev, Meera, Sam, Kabir) with standard test credentials, add them to a single group, and seed all transactions chronologically from our transaction history spreadsheet."
-* **System Design Response**: "I will create a database seeding script `seed_data.py` that wipes the existing schema for a clean slate, registers all 7 users, adds them to a new group 'Flatmates & Friends', and inserts the transactions. I will implement automated conversion for USD entries to INR at a baseline rate of 83.0 and normalize the percentage splits to sum to exactly 100.00% to pass API validations."
+### Dialogue 2: Handling Messy Historical Data (CSV Import)
+* **Senior Dev (User)**: "The group has a messy spreadsheet with inconsistent data — Meera moved out in March, Sam moved in during April, and there are USD expenses mixed with INR. I need an import tool that doesn't just guess numbers. If it's messy, flag it."
+* **Junior Engineer (Antigravity)**: "I will design a two-phase import system (Preview → Commit). I'll write heuristics to detect 12 specific anomalies (e.g., duplicate entries, currency mismatches, unknown members). Instead of silently fixing them, the API will surface them in the UI so the user can make an explicit decision (Accept, Skip, Resolve)."
+
+### Dialogue 3: Implementing Time-Aware Balances
+* **Senior Dev (User)**: "When calculating balances, we can't include Meera in April's expenses, and we can't include Sam in March's expenses. How do we model this without losing historical data?"
+* **Junior Engineer (Antigravity)**: "Initially, I suggested hard-deleting members, but you corrected me. I've now added `joined_at` and `left_at` timestamps to `group_members`. The balance algorithm will filter expenses using the condition `expenses.created_at >= joined_at AND expenses.created_at <= left_at`, perfectly isolating their financial liability."
+
+### Dialogue 4: Granular Transparency
+* **Senior Dev (User)**: "Rohan's requirement is 'no magic numbers'. If the app says he owes ₹2,300, he wants a breakdown of exactly what expenses make that up."
+* **Junior Engineer (Antigravity)**: "I'll create a new endpoint `/api/groups/{group_id}/breakdown/{user_id}` that traces every single expense the user was involved in during their active membership window. I'll add an expandable UI in the group ledger so members can drill down into their net balance."
 
 ---
 
 ## 7. Changes Made & Known Limitations
 
-### Changes Made During Implementation
-* **Dynamic Seeding System**: Wrote and executed a database seeding system to populate the database with a chronicled ledger of 42 transactions, translating standard splits, unequal splits, percentages, and shares into correct database rows.
-* **Multi-Payer Equal Division**: Structured the *House cleaning supplies* payment to divide the payment obligation equally among all roommates when the payer was unspecified, preventing ledger discrepancies.
-* **Exchange Conversion Integration**: Added inline USD-to-INR conversions for Goa trip expenses to keep balance aggregation mathematically accurate.
-* **Percentage Normalization**: Adjusted percentages for *Pizza Friday* and *Weekend brunch* to exactly 27.27% (Aisha/Rohan/Priya) and 18.19% (Meera) to solve the 110% overflow error.
+### Architectural Evolutions
+* **Schema Evolution via Migrations**: Transitioned from a static schema to an evolving one via `migrate.py`. Added `currency`, `original_amount`, `exchange_rate` to Expenses, and `joined_at`, `left_at` to Group Members.
+* **Time-Aware Memberships**: Shifted from hard-deletes to soft-deletes for group members. This preserves the historical accuracy of past expenses while correctly omitting inactive users from future splits.
+* **Two-Phase CSV Import Engine**: Built a robust React workflow (`ImportCSVModal`) that parses raw data, presents categorized anomalies, and executes user-approved corrections.
+* **Full-Featured Communication**: Expanded WebSockets from simple expense-level comments to a persistent, group-level chat panel with date separators, avatars, and history synchronization.
+* **Password Visibility Toggle**: Integrated an eye toggle visibility button (`Eye` / `EyeOff` from `lucide-react`) in the login and registration credentials form fields, improving user experience.
 
 ### Trade-offs & Known Limitations
-* **Single Currency Boundary**: The system operates entirely in a single baseline currency (rendered as Rupee ₹). Transactions entered in USD are converted at seed time; there is no dynamic runtime exchange rate module.
+* **Single Baseline Currency**: While original USD amounts are preserved, the actual ledger math operates exclusively in INR using a fixed exchange rate at the time of entry/import.
 * **No Real-world Payments**: Settlements are logical entries recorded to clear balances inside the application; no payment gateway API is wired.
 * **Local State Over Redux**: Chose React Hook Context over Redux or Zustand. While it keeps code footprints small, it requires full re-fetches upon group detail updates to sync balance updates.
 * **Group-centric Debt Simplification**: Debt simplification operates within the local group scope; it does not calculate inter-group credit offsets.

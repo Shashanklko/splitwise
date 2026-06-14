@@ -68,6 +68,9 @@ class ExpenseCreate(BaseModel):
     group_id: Optional[int] = None
     description: str = Field(..., min_length=1)
     amount: Decimal
+    currency: str = "INR"
+    original_amount: Optional[Decimal] = None
+    exchange_rate: Optional[Decimal] = None
     split_type: str  # equally, unequally, percentage, shares
     payers: List[ExpensePayerCreate]
     splits: List[ExpenseSplitCreate]
@@ -94,6 +97,9 @@ class ExpenseResponse(BaseModel):
     group_id: Optional[int]
     description: str
     amount: Decimal
+    currency: str
+    original_amount: Optional[Decimal] = None
+    exchange_rate: Optional[Decimal] = None
     split_type: str
     created_at: datetime
     payers: List[ExpensePayerResponse]
@@ -152,3 +158,26 @@ class UserBalanceSummary(BaseModel):
     user_id: int
     name: str
     net_balance: Decimal  # Positive means owed money, negative means owes money
+
+# --- CSV Import Schemas ---
+
+class ImportAnomalyItem(BaseModel):
+    row_index: int
+    anomaly_type: str       # e.g. "DUPLICATE", "CURRENCY_MISMATCH", "NEGATIVE_AMOUNT"
+    description: str        # Human-readable explanation
+    proposed_action: str    # e.g. "SKIP", "CONVERT_TO_INR", "TREAT_AS_REFUND"
+    raw_row: dict           # The original CSV row data
+    resolved_row: Optional[dict] = None  # The cleaned row if action is applied
+    user_decision: Optional[str] = None  # "ACCEPT" or "REJECT" - set by user
+
+class ImportPreviewResponse(BaseModel):
+    total_rows: int
+    clean_rows: int
+    anomaly_count: int
+    anomalies: List[ImportAnomalyItem]
+    ready_rows: List[dict]  # Rows with no anomalies, ready to commit
+
+class ImportCommitRequest(BaseModel):
+    group_id: int
+    ready_rows: List[dict]
+    resolved_anomalies: List[ImportAnomalyItem]  # Only those with user_decision=="ACCEPT"

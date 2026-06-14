@@ -7,71 +7,138 @@ from app import models, schemas
 def get_group_member_balances(db: Session, group_id: int) -> Dict[int, Decimal]:
     """
     Calculates the net balance of each user in a group.
+    TIME-AWARE: Only counts expenses that fall within the member's active membership window.
     Net Balance = (Total Paid + Total Settled Paid) - (Total Owed + Total Settled Received).
     """
-    # Get all members of the group
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
         return {}
 
-    member_ids = [m.id for m in group.members]
-    balances = {uid: Decimal("0.00") for uid in member_ids}
+    # Get ALL membership records (including ex-members) to compute time windows
+    all_memberships = db.query(models.GroupMember).filter(
+        models.GroupMember.group_id == group_id
+    ).all()
 
-    # 1. Add amount_paid by user in group expenses
-    payers_query = (
-        db.query(models.ExpensePayer.user_id, func.sum(models.ExpensePayer.amount_paid))
-        .join(models.Expense)
-        .filter(models.Expense.group_id == group_id)
-        .filter(models.ExpensePayer.user_id.in_(member_ids))
-        .group_by(models.ExpensePayer.user_id)
-        .all()
-    )
-    for uid, amt in payers_query:
-        if amt:
-            balances[uid] += Decimal(str(amt))
+    # Build per-member time window: user_id -> (joined_at, left_at)
+    membership_windows = {}
+    for m in all_memberships:
+        membership_windows[m.user_id] = (m.joined_at, m.left_at)
 
-    # 2. Subtract amount_owed by user in group expenses
-    splits_query = (
-        db.query(models.ExpenseSplit.user_id, func.sum(models.ExpenseSplit.amount_owed))
-        .join(models.Expense)
-        .filter(models.Expense.group_id == group_id)
-        .filter(models.ExpenseSplit.user_id.in_(member_ids))
-        .group_by(models.ExpenseSplit.user_id)
-        .all()
-    )
-    for uid, amt in splits_query:
-        if amt:
-            balances[uid] -= Decimal(str(amt))
+    # Only include currently active members in the balance output
+    active_member_ids = [m.user_id for m in all_memberships if m.left_at is None]
+    balances = {uid: Decimal("0.00") for uid in active_member_ids}
 
-    # 3. Add amount settled (paid) by user in group settlements
-    settled_paid_query = (
-        db.query(models.Settlement.payer_id, func.sum(models.Settlement.amount))
-        .filter(models.Settlement.group_id == group_id)
-        .filter(models.Settlement.payer_id.in_(member_ids))
-        .group_by(models.Settlement.payer_id)
-        .all()
-    )
-    for uid, amt in settled_paid_query:
-        if amt:
-            balances[uid] += Decimal(str(amt))
+    # For each active member, compute their balance only for expenses
+    # that fall within their membership window
+    for uid in active_member_ids:
+        joined_at, left_at = membership_windows.get(uid, (None, None))
 
-    # 4. Subtract amount settled (received) by user in group settlements
-    settled_recv_query = (
-        db.query(models.Settlement.payee_id, func.sum(models.Settlement.amount))
-        .filter(models.Settlement.group_id == group_id)
-        .filter(models.Settlement.payee_id.in_(member_ids))
-        .group_by(models.Settlement.payee_id)
-        .all()
-    )
-    for uid, amt in settled_recv_query:
-        if amt:
-            balances[uid] -= Decimal(str(amt))
+        # Build expense filter: within group, within membership window
+        expense_filter = [models.Expense.group_id == group_id]
+        if joined_at:
+            expense_filter.append(models.Expense.created_at >= joined_at)
+        if left_at:
+            expense_filter.append(models.Expense.created_at <= left_at)
+
+        # 1. Amount paid by this user in eligible expenses
+        paid_q = (
+            db.query(func.sum(models.ExpensePayer.amount_paid))
+            .join(models.Expense, models.ExpensePayer.expense_id == models.Expense.id)
+            .filter(models.ExpensePayer.user_id == uid)
+            .filter(*expense_filter)
+            .scalar()
+        )
+        if paid_q:
+            balances[uid] += Decimal(str(paid_q))
+
+        # 2. Amount owed by this user in eligible expenses
+        owed_q = (
+            db.query(func.sum(models.ExpenseSplit.amount_owed))
+            .join(models.Expense, models.ExpenseSplit.expense_id == models.Expense.id)
+            .filter(models.ExpenseSplit.user_id == uid)
+            .filter(*expense_filter)
+            .scalar()
+        )
+        if owed_q:
+            balances[uid] -= Decimal(str(owed_q))
+
+        # 3. Settlements paid by this user in this group
+        settled_paid = (
+            db.query(func.sum(models.Settlement.amount))
+            .filter(models.Settlement.group_id == group_id)
+            .filter(models.Settlement.payer_id == uid)
+            .scalar()
+        )
+        if settled_paid:
+            balances[uid] += Decimal(str(settled_paid))
+
+        # 4. Settlements received by this user in this group
+        settled_recv = (
+            db.query(func.sum(models.Settlement.amount))
+            .filter(models.Settlement.group_id == group_id)
+            .filter(models.Settlement.payee_id == uid)
+            .scalar()
+        )
+        if settled_recv:
+            balances[uid] -= Decimal(str(settled_recv))
 
     # Quantize to 2 decimals
     for uid in balances:
         balances[uid] = balances[uid].quantize(Decimal("0.01"))
 
     return balances
+
+
+def get_member_expense_breakdown(db: Session, group_id: int, user_id: int) -> List[Dict]:
+    """
+    Returns the list of expenses that contribute to a member's balance in a group.
+    For each expense, returns: description, date, amount_paid, amount_owed, net contribution.
+    This satisfies Rohan's requirement: 'I want to see exactly which expenses make that up.'
+    """
+    membership = db.query(models.GroupMember).filter(
+        models.GroupMember.group_id == group_id,
+        models.GroupMember.user_id == user_id
+    ).order_by(models.GroupMember.joined_at.desc()).first()
+
+    if not membership:
+        return []
+
+    joined_at = membership.joined_at
+    left_at = membership.left_at
+
+    # Get all expenses in group within membership window
+    expense_filter = [models.Expense.group_id == group_id]
+    if joined_at:
+        expense_filter.append(models.Expense.created_at >= joined_at)
+    if left_at:
+        expense_filter.append(models.Expense.created_at <= left_at)
+
+    expenses = db.query(models.Expense).filter(*expense_filter).order_by(
+        models.Expense.created_at.asc()
+    ).all()
+
+    breakdown = []
+    for exp in expenses:
+        paid = next((Decimal(str(p.amount_paid)) for p in exp.payers if p.user_id == user_id), Decimal("0.00"))
+        owed = next((Decimal(str(s.amount_owed)) for s in exp.splits if s.user_id == user_id), Decimal("0.00"))
+        net = paid - owed
+
+        if paid > Decimal("0.00") or owed > Decimal("0.00"):
+            breakdown.append({
+                "expense_id": exp.id,
+                "description": exp.description,
+                "date": exp.created_at.isoformat(),
+                "total_amount": str(exp.amount),
+                "currency": exp.currency,
+                "amount_paid": str(paid),
+                "amount_owed": str(owed),
+                "net": str(net),
+                "split_type": exp.split_type,
+            })
+
+    return breakdown
+
+
 
 def simplify_debts(balances: Dict[int, Decimal], db: Session) -> List[schemas.DebtCalculation]:
     """

@@ -8,6 +8,8 @@ class GroupMember(Base):
 
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    joined_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
+    left_at = Column(DateTime, nullable=True)  # None means still active
 
 class User(Base):
     __tablename__ = "users"
@@ -41,7 +43,10 @@ class Expense(Base):
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
     description = Column(String, nullable=False)
-    amount = Column(Numeric(10, 2), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)  # Always stored in INR
+    currency = Column(String, default="INR", nullable=False)  # Original currency code
+    original_amount = Column(Numeric(10, 4), nullable=True)  # Original amount in source currency
+    exchange_rate = Column(Numeric(10, 6), nullable=True)  # Rate used for conversion to INR
     split_type = Column(String, nullable=False)  # equally, unequally, percentage, shares
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -122,3 +127,25 @@ class Comment(Base):
     def user_name(self) -> str:
         return self.user.name if self.user else ""
 
+
+class GroupMessage(Base):
+    """
+    Persistent group-level chat messages.
+    Separate from expense-level comments — this is the group's shared channel,
+    accessible from the group page sidebar.
+    """
+    __tablename__ = "group_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    # Relationships
+    group = relationship("Group")
+    user = relationship("User")
+
+    @property
+    def user_name(self) -> str:
+        return self.user.name if self.user else ""
