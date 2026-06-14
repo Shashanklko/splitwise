@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: splitwise_db
+    restart: always
+    environment:
+      POSTGRES_USER: splitwise
+      POSTGRES_PASSWORD: splitwise_secure_pass
+      POSTGRES_DB: splitwise
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: splitwise_backend
+    restart: always
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://splitwise:splitwise_secure_pass@db:5432/splitwise
+      SECRET_KEY: super-secret-key-for-splitwise-clone-development-123456!!!
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: splitwise_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:

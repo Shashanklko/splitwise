@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+
+@theme {
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  
+  --color-brand-50: #e8faf6;
+  --color-brand-100: #cbf5eb;
+  --color-brand-500: #1cc29f; /* Splitwise Teal */
+  --color-brand-600: #159c7f;
+  --color-brand-700: #0f7862;
+
+
+  --color-accent-50: #fff1f2;
+  --color-accent-100: #ffe4e6;
+  --color-accent-500: #f43f5e; /* Rose */
+  --color-accent-600: #e11d48;
+
+  --color-success-50: #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-500: #10b981; /* Emerald */
+  --color-success-600: #059669;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b; /* Amber */
+  
+  --color-slate-950: #020617;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f7f7f7;
+  color: #1e293b;
+  overflow-x: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='40' viewBox='0 0 60 40'%3E%3Cpath d='M0 40L30 0L60 40Z' fill='none' stroke='%23ededed' stroke-width='1'/%3E%3Cpath d='M30 0L60 40L0 40Z' fill='none' stroke='%23f2f2f2' stroke-width='0.5'/%3E%3C/svg%3E");
+  background-size: 60px 40px;
+  background-attachment: fixed;
+}
+
+/* Light Glassmorphism panel helper */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-panel-hover:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(28, 194, 159, 0.3);
+  box-shadow: 0 10px 30px -10px rgba(28, 194, 159, 0.15);
+  transform: translateY(-2px);
+}
+
+
+/* Custom Scrollbar for premium feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(28, 194, 159, 0.5);
+
+}
+
+/* Animation Utilities */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px 0px rgba(28, 194, 159, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px 5px rgba(28, 194, 159, 0.4);
+  }
+}
+
+.pulse-glow-hover:hover {
+  animation: pulse-glow 2s infinite;
+}
+
+/* Form inputs styling */
+.glass-input {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #1e293b;
+  transition: all 0.2s ease;
+}
+.glass-input:focus {
+  outline: none;
+  border-color: rgba(28, 194, 159, 0.6);
+  box-shadow: 0 0 0 2px rgba(28, 194, 159, 0.1);
+  background: #ffffff;
+}
+
+
+/* Shimmer animation for loading states */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.shimmer-loader::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.05) 20%,
+    rgba(255, 255, 255, 0.1) 60%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: shimmer 2s infinite;
+  content: '';
+}
+
+/* Splitwise landing page illustration color classes (with gap anti-aliasing) */
+.s-p0 { fill: #ACE4D6; stroke: #ACE4D6; stroke-width: 0.5px; }
+.s-p1 { fill: #1CC29F; stroke: #1CC29F; stroke-width: 0.5px; }
+.s-p2 { fill: #137863; stroke: #137863; stroke-width: 0.5px; }
+.s-p3 { fill: #0c3c32; stroke: #0c3c32; stroke-width: 0.5px; }
+.s-p28 { fill: #ebf7f4; stroke: #ebf7f4; stroke-width: 0.5px; }
+
+.s-h4 { fill: #a473db; stroke: #a473db; stroke-width: 0.5px; }
+.s-h5 { fill: #dec9f1; stroke: #dec9f1; stroke-width: 0.5px; }
+.s-h6 { fill: #8f4ed3; stroke: #8f4ed3; stroke-width: 0.5px; }
+.s-h7 { fill: #4a276d; stroke: #4a276d; stroke-width: 0.5px; }
+.s-h8 { fill: #d0b3eb; stroke: #d0b3eb; stroke-width: 0.5px; }
+.s-h9 { fill: #ece0f7; stroke: #ece0f7; stroke-width: 0.5px; }
+
+.s-ht10 { fill: #df7a96; stroke: #df7a96; stroke-width: 0.5px; }
+.s-ht11 { fill: #F2C9D4; stroke: #F2C9D4; stroke-width: 0.5px; }
+.s-ht12 { fill: #880020; stroke: #880020; stroke-width: 0.5px; }
+.s-ht13 { fill: #B4002B; stroke: #B4002B; stroke-width: 0.5px; }
+.s-ht14 { fill: #5b0015; stroke: #5b0015; stroke-width: 0.5px; }
+.s-ht15 { fill: #c71e57; stroke: #c71e57; stroke-width: 0.5px; }
+.s-ht16 { fill: none; stroke: none; }
+
+.s-a17 { fill: #c4c8cf; stroke: #c4c8cf; stroke-width: 0.5px; }
+.s-a18 { fill: #909599; stroke: #909599; stroke-width: 0.5px; }
+.s-a19 { fill: #52595f; stroke: #52595f; stroke-width: 0.5px; }
+.s-a20 { fill: #757a7e; stroke: #757a7e; stroke-width: 0.5px; }
+.s-a21 { fill: #373B3F; stroke: #373B3F; stroke-width: 0.5px; }
+.s-a22 { fill: #909498; stroke: #909498; stroke-width: 0.5px; }
+.s-a25 { fill: #363b3f; stroke: #363b3f; stroke-width: 0.5px; }
+.s-a113 { fill: #747a80; stroke: #747a80; stroke-width: 0.5px; }
+.s-a114 { fill: #505960; stroke: #505960; stroke-width: 0.5px; }
+

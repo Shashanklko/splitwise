@@ -1,0 +1,44 @@
+services:
+  # 1. FastAPI Backend Service (builds via backend/Dockerfile)
+  - type: web
+    name: splitwise-backend
+    env: docker
+    dockerContext: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: splitwise-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+
+  # 2. React Frontend Static Site (served via CDN)
+  - type: web
+    name: splitwise-frontend
+    env: static
+    buildCommand: npm run build
+    publishPath: dist
+    plan: free
+    rootDir: frontend
+    routes:
+      # Rewrite /api requests to target the backend web service URL
+      - type: rewrite
+        source: /api/*
+        destination: https://splitwise-backend.onrender.com/api/*
+      # Rewrite /ws WebSocket connections to target the backend ws URL
+      - type: rewrite
+        source: /ws/*
+        destination: wss://splitwise-backend.onrender.com/ws/*
+      # SPA routing fallback for React Router
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  # 3. PostgreSQL Database instance
+  - name: splitwise-db
+    plan: free
+    postgresDatabase: splitwise
+    user: splitwise
