@@ -251,7 +251,7 @@ export default function ImportCSVModal({
       formData.append('file', file);
       formData.append('group_id', String(groupId));
 
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem('token');
       const res = await axios.post(`${API}/api/import/preview`, formData, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -298,7 +298,7 @@ export default function ImportCSVModal({
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem('token');
       const res = await axios.post(
         `${API}/api/import/commit`,
         {
